@@ -20,11 +20,11 @@
   function validateTargets(targets) {
     if (!Array.isArray(targets) || targets.length !== 3 ||
         targets.some(function (value) { return !finite(value) || value < 0 || value > 100; })) {
-      throw new Error('透射率、反射率和吸收率须为 0–100 之间的有限数值。');
+      throw new Error('Enter finite T, R and A values between 0 and 100%.');
     }
     var total = targets.reduce(function (sum, value) { return sum + value; }, 0);
     if (Math.abs(total - 100) > SUM_TOLERANCE + 1e-12) {
-      throw new Error('三个目标光学参数之和须为 100%（允许 0.01 个百分点的输入舍入误差）。');
+      throw new Error('T + R + A must equal 100% (rounding tolerance: 0.01 percentage points).');
     }
     return targets;
   }
@@ -33,30 +33,30 @@
     if (!data || !data.meta || !Array.isArray(data.materials) || !data.materials.length ||
         !finite(data.meta.min_nm) || !finite(data.meta.max_nm) ||
         data.meta.min_nm > data.meta.max_nm) {
-      throw new Error('模型预测数据格式不正确。');
+      throw new Error('The model prediction data is invalid.');
     }
-    if (!options) throw new Error('请先输入设计目标。');
+    if (!options) throw new Error('Enter the target optical response.');
     validateTargets(options.targets);
     if (!Number.isInteger(options.minNm) || !Number.isInteger(options.maxNm) ||
         options.minNm < data.meta.min_nm || options.maxNm > data.meta.max_nm ||
         options.minNm > options.maxNm) {
-      throw new Error('波长范围须为 ' + data.meta.min_nm + '–' + data.meta.max_nm + ' nm 内的整数，且下限不能超过上限。');
+      throw new Error('Wavelength bounds must be integers within ' + data.meta.min_nm + '–' + data.meta.max_nm + ' nm, with the minimum no greater than the maximum.');
     }
     if (!finite(options.tolerance) || options.tolerance < 0) {
-      throw new Error('允许偏差须为不小于 0 的有限数值，单位为百分点。');
+      throw new Error('Tolerance must be a finite non-negative number in percentage points.');
     }
     if (!Array.isArray(options.materials) || !options.materials.length) {
-      throw new Error('请至少选择一种材料。');
+      throw new Error('Select at least one metal.');
     }
     var known = new Set();
     data.materials.forEach(function (material) {
       if (!material || !Number.isInteger(material.code) || known.has(material.code) ||
           typeof material.symbol !== 'string' || typeof material.name !== 'string' ||
-          !Array.isArray(material.rows)) throw new Error('材料数据格式不正确。');
+          !Array.isArray(material.rows)) throw new Error('The material data is invalid.');
       known.add(material.code);
     });
     if (options.materials.some(function (code) { return !Number.isInteger(code) || !known.has(code); })) {
-      throw new Error('所选材料不在模型支持范围内。');
+      throw new Error('The selected metal is outside the model scope.');
     }
   }
 
@@ -73,7 +73,7 @@
       var bestFeasible = null;
       material.rows.forEach(function (row) {
         if (!Array.isArray(row) || row.length !== 4 || row.some(function (value) { return !finite(value); })) {
-          throw new Error('模型预测数据包含缺失值或无效数值。');
+          throw new Error('The prediction grid contains missing or invalid values.');
         }
         if (row[0] < options.minNm || row[0] > options.maxNm) return;
         count += 1;
@@ -96,11 +96,29 @@
       });
       if (best !== null) ranked.push(bestFeasible || best);
     });
-    if (!ranked.length) throw new Error('所选范围内没有可用的模型预测点。');
+    if (!ranked.length) throw new Error('No prediction points are available within this range.');
     ranked.sort(function (a, b) {
       return Number(b.meetsTolerance) - Number(a.meetsTolerance) || a.rmse - b.rmse || a.code - b.code || a.nm - b.nm;
     });
     return { ranked: ranked, count: count, feasibleCount: feasibleCount };
+  }
+
+  // Exact retrieval from the same fitted-model grid used by inverse search.
+  // Integer wavelengths only; never interpolate or silently round the input.
+  function predict(data, code, nm) {
+    if (!data || !data.meta || !Array.isArray(data.materials)) {
+      throw new Error('The model prediction data is invalid.');
+    }
+    if (!Number.isInteger(nm) || nm < data.meta.min_nm || nm > data.meta.max_nm) {
+      throw new Error('Enter a whole-number wavelength from ' + data.meta.min_nm + ' to ' + data.meta.max_nm + ' nm.');
+    }
+    var material = data.materials.find(function (item) { return item.code === code; });
+    if (!material) throw new Error('Select a supported metal.');
+    var row = material.rows.find(function (item) { return item[0] === nm; });
+    if (!row || row.length !== 4 || row.some(function (value) { return !finite(value); })) {
+      throw new Error('No valid model prediction is available at this wavelength.');
+    }
+    return { code: material.code, symbol: material.symbol, name: material.name, nm: nm, pred: row.slice(1) };
   }
 
   function csvField(value) {
@@ -110,7 +128,7 @@
 
   function toCSV(targets, result, query) {
     validateTargets(targets);
-    if (!result || !Array.isArray(result.ranked)) throw new Error('没有可导出的设计结果。');
+    if (!result || !Array.isArray(result.ranked)) throw new Error('There are no design results to export.');
     var constraints = null;
     if (query !== undefined && query !== null) {
       validateTargets(query.targets);
@@ -119,7 +137,7 @@
           !Number.isInteger(query.minNm) || !Number.isInteger(query.maxNm) || query.minNm > query.maxNm ||
           !Array.isArray(query.materials) || !query.materials.length ||
           query.materials.some(function (code) { return !Number.isInteger(code); })) {
-        throw new Error('导出的设计约束无效或与目标参数不一致。');
+        throw new Error('Export constraints are invalid or do not match the target.');
       }
       // Semicolon-separated codes remain a single, human-readable CSV field.
       var codes = Array.from(new Set(query.materials)).sort(function (a, b) { return a - b; });
@@ -140,5 +158,5 @@
     return rows.map(function (row) { return row.map(csvField).join(','); }).join('\r\n') + '\r\n';
   }
 
-  return Object.freeze({ search: search, toCSV: toCSV, validateTargets: validateTargets, SUM_TOLERANCE: SUM_TOLERANCE });
+  return Object.freeze({ predict: predict, search: search, toCSV: toCSV, validateTargets: validateTargets, SUM_TOLERANCE: SUM_TOLERANCE });
 });
