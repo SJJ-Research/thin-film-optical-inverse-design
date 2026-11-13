@@ -2,7 +2,7 @@
 
 Find a material and wavelength for a target transmittance, reflectance and absorptance using reproduced CatBoost predictions.
 
-[Open the interactive website](https://15800337764-maker.github.io/thin-film-optical-inverse-design/)
+[Open the interactive website](https://sjj-research.github.io/thin-film-optical-inverse-design/)
 
 ## Use
 
